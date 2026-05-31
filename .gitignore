@@ -12,3 +12,5 @@ coverage
 # Custom ignores
 .claude/
 *.md
+apps/mobile/android/app/google-servicesold.json
+apps/agent-mobile/android/app/google-servicesold.json
