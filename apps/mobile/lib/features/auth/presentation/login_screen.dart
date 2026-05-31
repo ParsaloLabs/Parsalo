@@ -27,7 +27,8 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_formKey.currentState!.validate()) {
       FocusScope.of(context).unfocus();
       final success = await widget.authNotifier.sendOtp(_phoneController.text.trim());
-      if (success && mounted) {
+      // If Android auto-retrieval signed the user in, AppRoot will swap to HomeScreen — skip OTP screen.
+      if (success && mounted && !widget.authNotifier.isAuthenticated) {
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (context) => OtpScreen(authNotifier: widget.authNotifier),

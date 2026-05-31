@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'core/config/pricing_config.dart';
 import 'core/config/service_area_config.dart';
@@ -11,6 +12,7 @@ import 'features/dashboard/presentation/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   await TokenStore.init();
   // Fire-and-forget: defaults match backend, so UI is usable before this returns.
   unawaited(PricingConfig.instance.load());

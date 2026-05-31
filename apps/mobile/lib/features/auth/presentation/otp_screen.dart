@@ -73,40 +73,7 @@ class _OtpScreenState extends State<OtpScreen> {
                       style: const TextStyle(fontSize: 14, color: AppColors.textSecondary),
                     ),
                     const SizedBox(height: 32),
-                    
-                    // Dev mode warning box
-                    if (notifier.devOtp != null) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.shade50,
-                          border: Border.all(color: Colors.amber.shade200),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            const Text('⚠️', style: TextStyle(fontSize: 16)),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: RichText(
-                                text: TextSpan(
-                                  style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
-                                  children: [
-                                    const TextSpan(text: 'Dev mode — use OTP: '),
-                                    TextSpan(
-                                      text: notifier.devOtp,
-                                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: 1),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                    ],
-                    
+
                     // Input Card
                     Container(
                       padding: const EdgeInsets.all(20),

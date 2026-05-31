@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "162153864595",
+    "project_id": "parsalo-otp",
+    "storage_bucket": "parsalo-otp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:162153864595:android:b950fabbce52425997dc66",
+        "android_client_info": {
+          "package_name": "com.parsalo.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC74xqeWxMTE6ZmvDIQY4iL2xnjMSPbErg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
