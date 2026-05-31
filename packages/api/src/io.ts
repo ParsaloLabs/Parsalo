@@ -3,12 +3,14 @@ import { env } from './env';
 
 let pusher: Pusher | null = null;
 
+const isReal = (v: string) => !!v && !v.startsWith('your_');
+
 export function initializeSocket() {
   if (
-    env.PUSHER_APP_ID &&
-    env.PUSHER_KEY &&
-    env.PUSHER_SECRET &&
-    env.PUSHER_CLUSTER
+    isReal(env.PUSHER_APP_ID) &&
+    isReal(env.PUSHER_KEY) &&
+    isReal(env.PUSHER_SECRET) &&
+    isReal(env.PUSHER_CLUSTER)
   ) {
     pusher = new Pusher({
       appId: env.PUSHER_APP_ID,
@@ -20,7 +22,7 @@ export function initializeSocket() {
     console.log('[pusher] Channels API client initialized');
   } else {
     console.warn(
-      '[pusher] credentials missing — real-time events will log to standard console'
+      '[pusher] credentials missing or placeholder — real-time events will log to standard console'
     );
   }
 }

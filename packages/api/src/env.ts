@@ -23,4 +23,16 @@ export const env = {
   // (best for hosts like Fly/Render that prefer env-only secrets).
   FIREBASE_SERVICE_ACCOUNT_PATH: process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? '',
   FIREBASE_SERVICE_ACCOUNT_JSON: process.env.FIREBASE_SERVICE_ACCOUNT_JSON ?? '',
+  // Used by Application Default Credentials path (when neither service-account
+  // env var is set). Required because the ADC file alone doesn't carry the
+  // project ID, but firebase-admin needs it to send FCM.
+  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID ?? '',
+  // Separate Firebase project used ONLY for customer phone OTP (web + mobile).
+  // Kept separate from FIREBASE_PROJECT_ID because that one is Identity-Platform-
+  // upgraded and breaks real-number sign-in; the OTP project is plain Firebase Auth.
+  CUSTOMER_FIREBASE_PROJECT_ID: process.env.CUSTOMER_FIREBASE_PROJECT_ID ?? '',
+  // Same idea as the primary FIREBASE_SERVICE_ACCOUNT_* pair, but for the customer
+  // OTP project — needed on hosts where ADC isn't set up (e.g. our oracle VPS).
+  CUSTOMER_FIREBASE_SERVICE_ACCOUNT_PATH: process.env.CUSTOMER_FIREBASE_SERVICE_ACCOUNT_PATH ?? '',
+  CUSTOMER_FIREBASE_SERVICE_ACCOUNT_JSON: process.env.CUSTOMER_FIREBASE_SERVICE_ACCOUNT_JSON ?? '',
 };

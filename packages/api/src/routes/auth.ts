@@ -6,7 +6,7 @@ import { query } from '../db';
 import { sendOtpSms } from '../sms';
 import { signAdminToken, signAgentToken, signUserToken } from '../auth';
 import { env } from '../env';
-import { getFirebaseApp } from '../firebase';
+import { getCustomerAuthApp } from '../firebase';
 
 const router = Router();
 
@@ -49,7 +49,7 @@ router.post('/firebase-login', firebaseLoginLimiter, async (req, res) => {
   const parsed = z.object({ id_token: z.string().min(20) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'invalid_input' });
 
-  const app = getFirebaseApp();
+  const app = getCustomerAuthApp();
   if (!app) return res.status(500).json({ error: 'firebase_not_configured' });
 
   let decoded;
