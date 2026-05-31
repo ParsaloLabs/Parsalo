@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "57253687021",
-    "project_id": "parsalo-labs",
-    "storage_bucket": "parsalo-labs.firebasestorage.app"
+    "project_number": "715965448891",
+    "project_id": "parsalo-fcm",
+    "storage_bucket": "parsalo-fcm.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:57253687021:android:330efae17da8a319fc26e4",
+        "mobilesdk_app_id": "1:715965448891:android:6b9839190f980485c2df9e",
         "android_client_info": {
           "package_name": "in.parsalo.parsalo_agent"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDz-9OKCRS_kXzrnMQKvxgSgAu5YvsDaVg"
+          "current_key": "AIzaSyBR3iRhd0TMcpTRHn4q4wcfWSGTIsV3ICw"
         }
       ],
       "services": {
