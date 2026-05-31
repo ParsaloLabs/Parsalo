@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../core/api_client.dart';
+import '../core/push/push_service.dart';
 import '../core/theme.dart';
 import '../models/dispatch_config.dart';
 import '../state/providers.dart';
@@ -21,6 +22,41 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _saving = false;
   String? _error;
   String? _savedAt;
+
+  bool? _pushEnabled;
+  bool _pushBusy = false;
+  String? _pushError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPushPreference();
+  }
+
+  Future<void> _loadPushPreference() async {
+    final dio = ref.read(apiClientProvider).dio;
+    final value = await adminPushService.fetchPreference(dio);
+    if (!mounted) return;
+    setState(() => _pushEnabled = value ?? true);
+  }
+
+  Future<void> _togglePush(bool next) async {
+    setState(() {
+      _pushBusy = true;
+      _pushError = null;
+    });
+    final dio = ref.read(apiClientProvider).dio;
+    final ok = await adminPushService.setPreference(dio, next);
+    if (!mounted) return;
+    setState(() {
+      _pushBusy = false;
+      if (ok) {
+        _pushEnabled = next;
+      } else {
+        _pushError = 'Could not update — check connection and retry.';
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -107,6 +143,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   const SizedBox(height: 16),
                 ],
+
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: BrandColors.creamCard,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: BrandColors.creamBorder),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Push notifications on this device',
+                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: BrandColors.primary),
+                            ),
+                          ),
+                          if (_pushEnabled == null)
+                            const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          else
+                            Switch(
+                              value: _pushEnabled!,
+                              onChanged: _pushBusy ? null : _togglePush,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Alerts for new orders, payments, and cancellations. Affects only this phone — other admin devices stay on.',
+                        style: TextStyle(fontSize: 12, color: BrandColors.textMuted),
+                      ),
+                      if (_pushError != null) ...[
+                        const SizedBox(height: 8),
+                        Text(_pushError!, style: TextStyle(color: Colors.red.shade900, fontSize: 12)),
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
 
                 Container(
                   padding: const EdgeInsets.all(20),

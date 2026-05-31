@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/api_client.dart';
+import '../core/push/push_service.dart';
 import '../core/token_storage.dart';
 import '../models/admin_kpi.dart';
 import '../models/admin_order.dart';
@@ -50,6 +51,9 @@ class AuthStateNotifier extends StateNotifier<AuthStatus> {
       if (token != null && token is String) {
         await _tokens.saveToken(token);
         state = AuthStatus.signedIn;
+        // Hand the FCM token to the backend so this device starts receiving
+        // order/payment alerts immediately after sign-in.
+        unawaited(adminPushService.registerWithBackend(_client.dio));
       } else {
         throw Exception('No token returned from server');
       }
@@ -59,6 +63,9 @@ class AuthStateNotifier extends StateNotifier<AuthStatus> {
   }
 
   Future<void> logout() async {
+    // Best-effort device-token cleanup BEFORE clearing the JWT — once the
+    // bearer is gone the DELETE call will 401.
+    await adminPushService.unregisterFromBackend(_client.dio);
     await _tokens.deleteToken();
     state = AuthStatus.signedOut;
   }
