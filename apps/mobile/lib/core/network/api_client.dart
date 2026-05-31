@@ -14,6 +14,8 @@ class ApiException implements Exception {
 class ApiClient {
   // Automatically choose base URL based on platform for easy local dev, with override support
   static String get baseUrl {
+    const override = String.fromEnvironment('API_URL');
+    if (override.isNotEmpty) return override;
     try {
       if (Platform.isAndroid) {
         return 'http://10.0.2.2:4000/api/v1';
