@@ -426,4 +426,68 @@ router.put('/flags/:key', requireAuth(['admin']), async (req, res) => {
   res.json({ ok: true });
 });
 
+// Device-token + push-preference routes for the admin mobile app.
+//
+// POST/DELETE follow the agent_devices pattern: upsert on (token), best-effort
+// delete on logout. push_enabled defaults TRUE so a fresh install opts in;
+// the toggle in the admin app's settings flips this flag for the current
+// device only (not all of the admin's devices) so admins can silence one
+// phone without losing alerts on a tablet.
+router.post('/device-token', requireAuth(['admin']), async (req, res) => {
+  const adminId = (req.principal as any).adminId;
+  const parsed = z.object({
+    token: z.string().min(20),
+    platform: z.enum(['android', 'ios']),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'invalid_input' });
+  await query(
+    `INSERT INTO admin_devices (admin_id, token, platform)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (token) DO UPDATE SET admin_id = EXCLUDED.admin_id,
+                                          platform = EXCLUDED.platform,
+                                          updated_at = NOW()`,
+    [adminId, parsed.data.token, parsed.data.platform],
+  );
+  res.json({ ok: true });
+});
+
+router.delete('/device-token', requireAuth(['admin']), async (req, res) => {
+  const adminId = (req.principal as any).adminId;
+  const parsed = z.object({ token: z.string().min(20) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'invalid_input' });
+  await query(`DELETE FROM admin_devices WHERE token = $1 AND admin_id = $2`,
+    [parsed.data.token, adminId]);
+  res.json({ ok: true });
+});
+
+router.get('/device-token/preferences', requireAuth(['admin']), async (req, res) => {
+  const adminId = (req.principal as any).adminId;
+  const token = req.query.token;
+  if (typeof token !== 'string' || token.length < 20) {
+    return res.status(400).json({ error: 'invalid_input' });
+  }
+  const { rows } = await query<{ push_enabled: boolean }>(
+    `SELECT push_enabled FROM admin_devices WHERE token = $1 AND admin_id = $2`,
+    [token, adminId],
+  );
+  if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
+  res.json({ push_enabled: rows[0].push_enabled });
+});
+
+router.patch('/device-token/preferences', requireAuth(['admin']), async (req, res) => {
+  const adminId = (req.principal as any).adminId;
+  const parsed = z.object({
+    token: z.string().min(20),
+    push_enabled: z.boolean(),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'invalid_input' });
+  const { rowCount } = await query(
+    `UPDATE admin_devices SET push_enabled = $1, updated_at = NOW()
+       WHERE token = $2 AND admin_id = $3`,
+    [parsed.data.push_enabled, parsed.data.token, adminId],
+  );
+  if (rowCount === 0) return res.status(404).json({ error: 'not_found' });
+  res.json({ ok: true, push_enabled: parsed.data.push_enabled });
+});
+
 export default router;

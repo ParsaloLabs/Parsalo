@@ -1,6 +1,6 @@
 import { env } from './env';
 import { query } from './db';
-import { sendPushToAgent } from './push';
+import { sendPushToAdmins, sendPushToAgent, sendPushToUser } from './push';
 import { broadcastToOrder } from './io';
 
 const DEV = !env.MSG91_AUTH_KEY;
@@ -46,12 +46,14 @@ type OrderEvent =
 type OrderRow = {
   id: string; order_code: string; order_type: 'send' | 'receive';
   total_amount: number; delivery_otp: string;
-  user_phone: string; agent_phone?: string | null; agent_name?: string | null;
+  user_id: string; user_phone: string;
+  agent_phone?: string | null; agent_name?: string | null;
 };
 
 async function loadOrder(orderId: string): Promise<OrderRow | null> {
   const { rows } = await query<OrderRow>(
     `SELECT o.id, o.order_code, o.order_type, o.total_amount, o.delivery_otp,
+            o.user_id,
             u.phone AS user_phone,
             a.phone AS agent_phone, a.full_name AS agent_name
        FROM orders o
@@ -105,6 +107,53 @@ function agentMessage(o: OrderRow, event: OrderEvent): string | null {
   return null;
 }
 
+// Short customer-app push body — SMS copy above is long-form for offline users
+// without the app. The phone-popup version is tighter to fit the lockscreen.
+function customerPush(o: OrderRow, event: OrderEvent): { title: string; body: string } | null {
+  switch (event) {
+    case 'paid':
+      return { title: `Order ${o.order_code} booked`, body: `We're finding an agent for you.` };
+    case 'agent_assigned':
+      return {
+        title: `Agent assigned · ${o.order_code}`,
+        body: `${o.agent_name ?? 'Your agent'} is on it. Tap to track.`,
+      };
+    case 'agent_en_route_pickup':
+      return { title: `Agent on the way · ${o.order_code}`, body: `Heading to ${o.order_type === RECEIVE ? 'the courier office' : 'your address'}.` };
+    case 'parcel_collected':
+      return {
+        title: `Parcel collected · ${o.order_code}`,
+        body: o.order_type === RECEIVE ? `Coming to your address now.` : `On the way to the courier.`,
+      };
+    case 'out_for_delivery':
+      return { title: `Out for delivery · ${o.order_code}`, body: o.order_type === RECEIVE ? `Share OTP ${o.delivery_otp} at handover.` : `Almost at the courier office.` };
+    case 'delivered':
+      return { title: `Delivered ✓ · ${o.order_code}`, body: o.order_type === RECEIVE ? `Hope to serve you again!` : `Tracking ID will follow on courier SMS.` };
+    case 'cancelled':
+      return { title: `Cancelled · ${o.order_code}`, body: `Refund (if applicable) is processing.` };
+    case 'failed':
+      return { title: `Couldn't complete ${o.order_code}`, body: `Open the app to retry or request a refund.` };
+    default:
+      return null;
+  }
+}
+
+// Admin push — only for events that warrant operator attention. We skip the
+// happy-path middle states (en_route, collected, out_for_delivery) so admins
+// aren't pinged 6 times per order.
+function adminPush(o: OrderRow, event: OrderEvent): { title: string; body: string } | null {
+  switch (event) {
+    case 'paid':
+      return { title: `New order · ${o.order_code}`, body: `${o.order_type === 'send' ? 'Send' : 'Receive'} · ₹${Math.round(o.total_amount / 100)}` };
+    case 'cancelled':
+      return { title: `Cancelled · ${o.order_code}`, body: `Order cancelled.` };
+    case 'failed':
+      return { title: `Failed · ${o.order_code}`, body: `Order could not be completed.` };
+    default:
+      return null;
+  }
+}
+
 export async function notifyOrderEvent(orderId: string, event: OrderEvent) {
   try {
     // Broadcast status change immediately to all connected clients tracking this order
@@ -133,6 +182,27 @@ export async function notifyOrderEvent(orderId: string, event: OrderEvent) {
           data: { orderId, kind: 'assigned' },
         });
       }
+    }
+
+    // Push the customer's device(s) on every status change so the lockscreen
+    // updates without them having to open the app.
+    const cp = customerPush(o, event);
+    if (cp) {
+      await sendPushToUser(o.user_id, {
+        title: cp.title,
+        body: cp.body,
+        data: { orderId, kind: 'order_event', event },
+      });
+    }
+
+    // Push admins on operator-relevant events only.
+    const ap = adminPush(o, event);
+    if (ap) {
+      await sendPushToAdmins({
+        title: ap.title,
+        body: ap.body,
+        data: { orderId, kind: 'order_event', event },
+      });
     }
   } catch (e) {
     console.warn('[notify] failed', e);

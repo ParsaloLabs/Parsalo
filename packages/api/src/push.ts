@@ -1,9 +1,18 @@
 import admin from 'firebase-admin';
-import { getFirebaseApp } from './firebase';
+import { getCustomerAuthApp, getFirebaseApp } from './firebase';
 import { query } from './db';
 
 function getMessaging(): admin.messaging.Messaging | null {
   const app = getFirebaseApp();
+  return app ? app.messaging() : null;
+}
+
+// Customer device tokens are minted by the parsalo-otp Firebase project (the
+// app uses that project's google-services.json for phone-auth too) so FCM
+// sends to them must authenticate via the customer-auth admin app. The agent
+// + admin apps both live in parsalo-fcm and use the default app above.
+function getCustomerMessaging(): admin.messaging.Messaging | null {
+  const app = getCustomerAuthApp();
   return app ? app.messaging() : null;
 }
 
@@ -33,16 +42,22 @@ async function loadTokensForOnlineAgents(): Promise<string[]> {
   return rows.map((r) => r.token);
 }
 
-async function pruneInvalidTokens(badTokens: string[]) {
+type DeviceTable = 'agent_devices' | 'user_devices' | 'admin_devices';
+
+async function pruneInvalidTokens(table: DeviceTable, badTokens: string[]) {
   if (badTokens.length === 0) return;
-  await query(`DELETE FROM agent_devices WHERE token = ANY($1::text[])`, [badTokens]);
+  await query(`DELETE FROM ${table} WHERE token = ANY($1::text[])`, [badTokens]);
 }
 
-async function sendToTokens(tokens: string[], payload: PushPayload) {
+async function sendViaMessaging(
+  fcm: admin.messaging.Messaging | null,
+  table: DeviceTable,
+  tokens: string[],
+  payload: PushPayload,
+) {
   if (tokens.length === 0) return;
-  const fcm = getMessaging();
   if (!fcm) {
-    console.log(`[push:dev] would send to ${tokens.length} device(s):`, payload);
+    console.log(`[push:dev] would send to ${tokens.length} device(s) [${table}]:`, payload);
     return;
   }
 
@@ -67,7 +82,11 @@ async function sendToTokens(tokens: string[], payload: PushPayload) {
       console.warn('[push] send error', code, r.error?.message);
     }
   });
-  if (stale.length) await pruneInvalidTokens(stale);
+  if (stale.length) await pruneInvalidTokens(table, stale);
+}
+
+async function sendToTokens(tokens: string[], payload: PushPayload) {
+  await sendViaMessaging(getMessaging(), 'agent_devices', tokens, payload);
 }
 
 export async function sendPushToAgent(agentId: string, payload: PushPayload) {
@@ -85,5 +104,38 @@ export async function sendPushToOnlineAgents(payload: PushPayload) {
     await sendToTokens(tokens, payload);
   } catch (e) {
     console.warn('[push] broadcast failed', e);
+  }
+}
+
+async function loadTokensForUser(userId: string): Promise<string[]> {
+  const { rows } = await query<{ token: string }>(
+    `SELECT token FROM user_devices WHERE user_id = $1`,
+    [userId],
+  );
+  return rows.map((r) => r.token);
+}
+
+async function loadTokensForEnabledAdmins(): Promise<string[]> {
+  const { rows } = await query<{ token: string }>(
+    `SELECT token FROM admin_devices WHERE push_enabled = TRUE`,
+  );
+  return rows.map((r) => r.token);
+}
+
+export async function sendPushToUser(userId: string, payload: PushPayload) {
+  try {
+    const tokens = await loadTokensForUser(userId);
+    await sendViaMessaging(getCustomerMessaging(), 'user_devices', tokens, payload);
+  } catch (e) {
+    console.warn('[push] user send failed', e);
+  }
+}
+
+export async function sendPushToAdmins(payload: PushPayload) {
+  try {
+    const tokens = await loadTokensForEnabledAdmins();
+    await sendViaMessaging(getMessaging(), 'admin_devices', tokens, payload);
+  } catch (e) {
+    console.warn('[push] admin broadcast failed', e);
   }
 }
