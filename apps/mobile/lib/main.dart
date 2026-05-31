@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'core/config/pricing_config.dart';
 import 'core/config/service_area_config.dart';
+import 'core/push/push_service.dart';
 import 'core/storage/token_store.dart';
 import 'core/theme/theme.dart';
 import 'features/auth/presentation/auth_notifier.dart';
@@ -13,7 +15,14 @@ import 'features/dashboard/presentation/home_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   await TokenStore.init();
+  await pushService.init();
+  // Already-logged-in users: register the FCM token now so existing devices
+  // start receiving pushes without needing to re-login.
+  if (TokenStore.hasToken()) {
+    unawaited(pushService.registerWithBackend());
+  }
   // Fire-and-forget: defaults match backend, so UI is usable before this returns.
   unawaited(PricingConfig.instance.load());
   unawaited(ServiceAreaConfig.instance.load());

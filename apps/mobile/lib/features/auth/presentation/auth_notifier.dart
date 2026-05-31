@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/push/push_service.dart';
 import '../../../core/storage/token_store.dart';
 
 class AuthNotifier extends ChangeNotifier {
@@ -117,6 +118,9 @@ class AuthNotifier extends ChangeNotifier {
       _isAuthenticated = true;
       _loading = false;
       notifyListeners();
+      // Now that we have a session token, hand the FCM token to the backend
+      // so this device starts receiving order pushes.
+      unawaited(pushService.registerWithBackend());
       return true;
     } on FirebaseAuthException catch (e) {
       _error = _friendlyFirebaseError(e);
@@ -132,6 +136,9 @@ class AuthNotifier extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // Best-effort device-token cleanup BEFORE clearing the JWT — once the
+    // bearer is gone the DELETE call will 401.
+    await pushService.unregisterFromBackend();
     await TokenStore.setToken(null);
     await FirebaseAuth.instance.signOut();
     _isAuthenticated = false;
