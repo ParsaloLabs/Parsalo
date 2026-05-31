@@ -16,8 +16,5 @@
   },
   "engines": {
     "node": ">=18"
-  },
-  "devDependencies": {
-    "@next/swc-darwin-arm64": "^16.2.6"
   }
 }
