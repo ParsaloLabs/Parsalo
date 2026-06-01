@@ -8,19 +8,28 @@ type DispatchConfig = {
   updated_at: string;
 };
 
+const OVERRIDE_CEILING_FLAG = 'max_concurrent_jobs_override_ceiling';
+
 export default function SettingsPage() {
   const [cfg, setCfg] = useState<DispatchConfig | null>(null);
   const [radiusKm, setRadiusKm] = useState('5');
   const [ttl, setTtl] = useState('30');
+  const [ceiling, setCeiling] = useState('5');
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
-    const data = await api<DispatchConfig>('/admin/dispatch-config');
+    const [data, flags] = await Promise.all([
+      api<DispatchConfig>('/admin/dispatch-config'),
+      api<Record<string, unknown>>('/admin/flags'),
+    ]);
     setCfg(data);
     setRadiusKm((data.initial_radius_m / 1000).toString());
     setTtl(data.offer_ttl_seconds.toString());
+    const raw = flags[OVERRIDE_CEILING_FLAG];
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    if (Number.isFinite(n) && n > 0) setCeiling(String(n));
   };
 
   useEffect(() => { load().catch((e) => setError(e.message)); }, []);
@@ -32,10 +41,20 @@ export default function SettingsPage() {
     try {
       const radiusM = Math.round(parseFloat(radiusKm) * 1000);
       const ttlSeconds = parseInt(ttl, 10);
-      const data = await api<DispatchConfig>('/admin/dispatch-config', {
-        method: 'POST',
-        body: { initial_radius_m: radiusM, offer_ttl_seconds: ttlSeconds },
-      });
+      const ceilingN = parseInt(ceiling, 10);
+      if (!Number.isFinite(ceilingN) || ceilingN < 2 || ceilingN > 20) {
+        throw new Error('Ceiling must be between 2 and 20');
+      }
+      const [data] = await Promise.all([
+        api<DispatchConfig>('/admin/dispatch-config', {
+          method: 'POST',
+          body: { initial_radius_m: radiusM, offer_ttl_seconds: ttlSeconds },
+        }),
+        api(`/admin/flags/${OVERRIDE_CEILING_FLAG}`, {
+          method: 'PUT',
+          body: { value: ceilingN },
+        }),
+      ]);
       setCfg(data);
       setSavedAt(new Date().toLocaleTimeString());
     } catch (e: any) {
@@ -93,6 +112,17 @@ export default function SettingsPage() {
             <input
               type="number" step="1" min="5" max="600" required
               value={ttl} onChange={(e) => setTtl(e.target.value)}
+              className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-32"
+            />
+          </Field>
+
+          <Field
+            label="Max orders when override is on"
+            help="Default cap is 2 active orders per agent. When an agent flips the 'Accept more orders' switch in their app, this is the hard ceiling they can be assigned up to. Auto-resets to OFF once they drop below 2."
+          >
+            <input
+              type="number" step="1" min="2" max="20" required
+              value={ceiling} onChange={(e) => setCeiling(e.target.value)}
               className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-32"
             />
           </Field>
