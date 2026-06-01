@@ -5,13 +5,47 @@ import { requireAuth } from '../auth';
 import { notifyOrderEvent } from '../notifications';
 import { cancelOpenOffers, dispatchConfig, dispatchOrder } from '../dispatch';
 import { broadcastToOrder } from '../io';
+import { getNumberFlag } from '../flags';
+
+const FLAG_OVERRIDE_CEILING = 'max_concurrent_jobs_override_ceiling';
+const DEFAULT_OVERRIDE_CEILING = 5;
+
+// Auto-reset the per-agent extra-orders override once active load drops below
+// the global cap. Keeps the toggle from leaking past the shift it was meant
+// for, so the next overflow has to be opted-in again.
+export async function resetExtraOrdersIfBelowCap(agentId: string): Promise<void> {
+  try {
+    const { rows } = await query<{ active: number; accept_extra_orders: boolean }>(
+      `SELECT COUNT(o.id)::int AS active,
+              MAX(CASE WHEN a.accept_extra_orders THEN 1 ELSE 0 END)::int AS accept_extra_orders
+         FROM agents a
+         LEFT JOIN orders o
+           ON o.agent_id = a.id
+          AND o.status NOT IN ('delivered','cancelled','failed')
+        WHERE a.id = $1
+        GROUP BY a.id`,
+      [agentId],
+    );
+    const row = rows[0];
+    if (!row) return;
+    if (!row.accept_extra_orders) return;
+    if (row.active < dispatchConfig.MAX_CONCURRENT_JOBS) {
+      await query(
+        `UPDATE agents SET accept_extra_orders = FALSE WHERE id = $1`,
+        [agentId],
+      );
+    }
+  } catch (e) {
+    console.warn('[agent] resetExtraOrdersIfBelowCap failed', e);
+  }
+}
 
 const router = Router();
 
 router.get('/me', requireAuth(['agent']), async (req, res) => {
   const agentId = (req.principal as any).agentId;
   const { rows } = await query(
-    `SELECT id, phone, full_name, email, vehicle_type, vehicle_number, rating, total_deliveries, is_online FROM agents WHERE id = $1`,
+    `SELECT id, phone, full_name, email, vehicle_type, vehicle_number, rating, total_deliveries, is_online, accept_extra_orders FROM agents WHERE id = $1`,
     [agentId],
   );
   if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
@@ -139,14 +173,23 @@ router.post('/jobs/:id/accept', requireAuth(['agent']), async (req, res) => {
   );
   if (offerRows.length === 0) return res.status(403).json({ error: 'no_offer' });
 
-  // Concurrent-job cap: agent may hold at most MAX_CONCURRENT_JOBS open
-  // assignments (1 in-flight + 1 queued in the default config).
-  const { rows: loadRows } = await query<{ active: number }>(
-    `SELECT COUNT(*)::int AS active FROM orders
-       WHERE agent_id = $1 AND status NOT IN ('delivered','cancelled','failed')`,
+  // Concurrent-job cap. Default cap is MAX_CONCURRENT_JOBS (=2). Agents who
+  // have toggled `accept_extra_orders` ON get the admin-configured override
+  // ceiling instead — which still bounds them, so the override isn't unlimited.
+  const { rows: loadRows } = await query<{ active: number; accept_extra_orders: boolean }>(
+    `SELECT
+        (SELECT COUNT(*)::int FROM orders
+           WHERE agent_id = $1 AND status NOT IN ('delivered','cancelled','failed')) AS active,
+        accept_extra_orders
+       FROM agents WHERE id = $1`,
     [agentId],
   );
-  if ((loadRows[0]?.active ?? 0) >= dispatchConfig.MAX_CONCURRENT_JOBS) {
+  const active = loadRows[0]?.active ?? 0;
+  const acceptsExtra = loadRows[0]?.accept_extra_orders ?? false;
+  const effectiveCap = acceptsExtra
+    ? await getNumberFlag(FLAG_OVERRIDE_CEILING, DEFAULT_OVERRIDE_CEILING)
+    : dispatchConfig.MAX_CONCURRENT_JOBS;
+  if (active >= effectiveCap) {
     return res.status(409).json({ error: 'concurrent_cap_reached' });
   }
 
@@ -271,6 +314,12 @@ router.post('/jobs/:id/update-status', requireAuth(['agent']), async (req, res) 
     );
   }
 
+  // Once the agent's load drops below the global cap, reset their per-shift
+  // override so they have to opt-in again the next time they're at the ceiling.
+  if (status === 'delivered' || status === 'failed') {
+    await resetExtraOrdersIfBelowCap(agentId);
+  }
+
   notifyOrderEvent(req.params.id, status as any);
   res.json({ ok: true, status });
 });
@@ -340,7 +389,45 @@ router.post('/online-status', requireAuth(['agent']), async (req, res) => {
   const parsed = z.object({ is_online: z.boolean() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'invalid_input' });
   await query(`UPDATE agents SET is_online = $1 WHERE id = $2`, [parsed.data.is_online, agentId]);
+  // Going offline auto-drops the override so a re-online doesn't surprise the
+  // agent with an unexpected overflow.
+  if (!parsed.data.is_online) {
+    await query(`UPDATE agents SET accept_extra_orders = FALSE WHERE id = $1`, [agentId]);
+  }
   res.json({ ok: true });
+});
+
+// Per-shift override of the global dispatch cap. Turning ON requires the
+// agent to be online AND already at-or-past the global cap — the feature
+// exists to opt into overflow, not to pre-stage extra capacity. Turning OFF
+// is always allowed.
+router.post('/accept-extra-orders', requireAuth(['agent']), async (req, res) => {
+  const agentId = (req.principal as any).agentId;
+  const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'invalid_input' });
+
+  if (parsed.data.enabled) {
+    const { rows } = await query<{ is_online: boolean; active: number }>(
+      `SELECT a.is_online,
+              (SELECT COUNT(*)::int FROM orders
+                 WHERE agent_id = a.id
+                   AND status NOT IN ('delivered','cancelled','failed')) AS active
+         FROM agents a WHERE a.id = $1`,
+      [agentId],
+    );
+    const row = rows[0];
+    if (!row) return res.status(404).json({ error: 'not_found' });
+    if (!row.is_online) return res.status(409).json({ error: 'must_be_online' });
+    if (row.active < dispatchConfig.MAX_CONCURRENT_JOBS) {
+      return res.status(409).json({ error: 'below_cap' });
+    }
+  }
+
+  await query(
+    `UPDATE agents SET accept_extra_orders = $1 WHERE id = $2`,
+    [parsed.data.enabled, agentId],
+  );
+  res.json({ ok: true, accept_extra_orders: parsed.data.enabled });
 });
 
 // Job history — completed / cancelled / failed orders for the driver profile page

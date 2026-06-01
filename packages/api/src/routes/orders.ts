@@ -7,6 +7,7 @@ import { generateOrderCode } from '../orderCode';
 import { notifyOrderEvent } from '../notifications';
 import { buildAuthorizationPdf } from '../pdf';
 import { isPinServiceable } from '../serviceArea';
+import { resetExtraOrdersIfBelowCap } from './agent';
 
 const router = Router();
 
@@ -325,6 +326,10 @@ router.post('/:id/cancel', requireAuth(['user']), async (req, res) => {
   if (['delivered', 'cancelled', 'failed'].includes(rows[0].status)) {
     return res.status(400).json({ error: 'cannot_cancel' });
   }
+  const { rows: agentRows } = await query<{ agent_id: string | null }>(
+    `SELECT agent_id FROM orders WHERE id = $1`,
+    [req.params.id],
+  );
   await query(
     `UPDATE orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1`,
     [req.params.id],
@@ -333,6 +338,9 @@ router.post('/:id/cancel', requireAuth(['user']), async (req, res) => {
     `INSERT INTO order_status_history (order_id, status, notes, changed_by_type, changed_by_id) VALUES ($1, 'cancelled', $2, 'user', $3)`,
     [req.params.id, reason, userId],
   );
+  if (agentRows[0]?.agent_id) {
+    await resetExtraOrdersIfBelowCap(agentRows[0].agent_id);
+  }
   notifyOrderEvent(req.params.id, 'cancelled');
   res.json({ ok: true });
 });

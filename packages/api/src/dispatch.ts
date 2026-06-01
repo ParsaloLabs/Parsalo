@@ -22,6 +22,10 @@
 
 import { query } from './db';
 import { sendPushToAgent } from './push';
+import { getNumberFlag } from './flags';
+
+const FLAG_OVERRIDE_CEILING = 'max_concurrent_jobs_override_ceiling';
+const DEFAULT_OVERRIDE_CEILING = 5;
 
 // Tunable at runtime via the admin panel (table: dispatch_config).
 // Defaults match the table's column defaults so a missing row degrades sanely.
@@ -124,7 +128,10 @@ async function pickCandidates(
   // Subquery: each agent's active-job count + next-free location.
   // If they have ≥1 active job, score them from the drop point of the most
   // recent active assignment; otherwise from their current GPS ping.
-  const params: any[] = [order.pickup_lat, order.pickup_lng, MAX_CONCURRENT_JOBS, order.id];
+  // $3 = global cap, $5 = admin-configured override ceiling for agents who
+  // opted into accept_extra_orders.
+  const overrideCeiling = await getNumberFlag(FLAG_OVERRIDE_CEILING, DEFAULT_OVERRIDE_CEILING);
+  const params: any[] = [order.pickup_lat, order.pickup_lng, MAX_CONCURRENT_JOBS, order.id, overrideCeiling];
   const radiusClause = radiusM === null
     ? ''
     : `AND score_distance_m <= $${params.push(radiusM)}`;
@@ -138,6 +145,7 @@ async function pickCandidates(
       SELECT a.id AS agent_id,
              a.current_lat::float8  AS cur_lat,
              a.current_lng::float8  AS cur_lng,
+             a.accept_extra_orders  AS accept_extra,
              COUNT(o.id)::int       AS active_jobs,
              -- next-free location: drop coords of the most-recent active job,
              -- falling back to the agent's current GPS if no active job.
@@ -173,6 +181,7 @@ async function pickCandidates(
     )
     SELECT agent_id,
            active_jobs,
+           accept_extra,
            -- Haversine in metres against the order pickup.
            (
              2 * 6371000 * ASIN(
@@ -195,7 +204,7 @@ async function pickCandidates(
              * CASE WHEN active_jobs > 0 THEN ${BUSY_PENALTY} ELSE 1 END
            )::int AS score_distance_m
       FROM agent_load
-     WHERE active_jobs < $3
+     WHERE (active_jobs < $3 OR (accept_extra = TRUE AND active_jobs < $5))
        AND agent_id NOT IN (
          SELECT agent_id FROM job_offers
           WHERE order_id = $4 AND status = 'offered'
