@@ -64,6 +64,17 @@ class AgentService {
     }
   }
 
+  Future<void> setAcceptExtraOrders(bool enabled) async {
+    try {
+      await _api.dio.post(
+        '/agent/accept-extra-orders',
+        data: {'enabled': enabled},
+      );
+    } on DioException catch (e) {
+      throw extractErrorCode(e);
+    }
+  }
+
   Future<void> postLocation(double lat, double lng) async {
     try {
       await _api.dio.post('/agent/location', data: {'lat': lat, 'lng': lng});

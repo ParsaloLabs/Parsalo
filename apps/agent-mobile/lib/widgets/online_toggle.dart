@@ -27,6 +27,24 @@ class OnlineToggleCard extends ConsumerWidget {
     }
   }
 
+  Future<void> _toggleExtra(
+    BuildContext context,
+    WidgetRef ref,
+    bool next,
+  ) async {
+    try {
+      await ref.read(acceptExtraOrdersProvider.notifier).setEnabled(next);
+    } catch (e) {
+      if (!context.mounted) return;
+      final msg = e is String && e == 'must_be_online'
+          ? 'Go online first to accept extra orders.'
+          : e is String && e == 'below_cap'
+              ? 'Only available once you have 2 active orders.'
+              : 'Could not update — try again.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final online = ref.watch(onlineStatusProvider);
@@ -39,6 +57,15 @@ class OnlineToggleCard extends ConsumerWidget {
               error: (_, _) => 'Unavailable',
             )
         : null;
+
+    // Show the per-shift "accept more orders" override only when the agent is
+    // actually at the global cap — otherwise the toggle is just noise.
+    final assignedCount = ref.watch(dashboardFeedProvider).maybeWhen(
+          data: (snap) => snap.jobs.assigned.length,
+          orElse: () => 0,
+        );
+    final showExtra = online && assignedCount >= 2;
+    final acceptExtra = ref.watch(acceptExtraOrdersProvider);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -58,7 +85,10 @@ class OnlineToggleCard extends ConsumerWidget {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
         children: [
           Expanded(
             child: Column(
@@ -158,6 +188,53 @@ class OnlineToggleCard extends ConsumerWidget {
               ],
             ),
           ),
+        ],
+          ),
+          if (showExtra) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+              ),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Accept more orders',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Lift the 2-order cap for this shift. Auto-resets when you finish one.',
+                          style: TextStyle(
+                            color: Color(0xFFE0E7FF),
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch.adaptive(
+                    value: acceptExtra,
+                    onChanged: (v) => _toggleExtra(context, ref, v),
+                    activeTrackColor: Colors.white,
+                    activeThumbColor: BrandColors.emeraldDark,
+                    inactiveTrackColor: Colors.white.withValues(alpha: 0.25),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

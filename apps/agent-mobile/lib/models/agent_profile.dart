@@ -8,6 +8,7 @@ class AgentProfile {
   final double rating;
   final int totalDeliveries;
   final bool isOnline;
+  final bool acceptExtraOrders;
 
   const AgentProfile({
     required this.id,
@@ -19,6 +20,7 @@ class AgentProfile {
     required this.rating,
     required this.totalDeliveries,
     required this.isOnline,
+    required this.acceptExtraOrders,
   });
 
   factory AgentProfile.fromJson(Map<String, dynamic> j) {
@@ -39,6 +41,7 @@ class AgentProfile {
       rating: parseRating(j['rating']),
       totalDeliveries: (j['total_deliveries'] as num?)?.toInt() ?? 0,
       isOnline: j['is_online'] as bool? ?? false,
+      acceptExtraOrders: j['accept_extra_orders'] as bool? ?? false,
     );
   }
 }

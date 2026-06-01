@@ -196,6 +196,51 @@ final onlineStatusProvider =
   );
 });
 
+// ─── Per-shift dispatch-cap override ─────────────────────────────────────────
+
+class AcceptExtraOrdersNotifier extends StateNotifier<bool> {
+  final AgentService _agent;
+
+  AcceptExtraOrdersNotifier(this._agent, bool initial) : super(initial);
+
+  Future<void> setEnabled(bool next) async {
+    final previous = state;
+    state = next;
+    try {
+      await _agent.setAcceptExtraOrders(next);
+    } catch (e) {
+      state = previous;
+      rethrow;
+    }
+  }
+
+  // Server auto-clears the flag when the agent goes offline. Mirror that here
+  // so the UI doesn't show the switch as "on" until the next /me poll.
+  void resetLocal() {
+    if (state) state = false;
+  }
+}
+
+final acceptExtraOrdersProvider =
+    StateNotifierProvider<AcceptExtraOrdersNotifier, bool>((ref) {
+  final profile = ref.watch(agentProfileProvider).valueOrNull;
+  final notifier = AcceptExtraOrdersNotifier(
+    ref.read(agentServiceProvider),
+    profile?.acceptExtraOrders ?? false,
+  );
+  ref.listen<bool>(onlineStatusProvider, (prev, next) {
+    if (!next) notifier.resetLocal();
+  });
+  // Server auto-clears accept_extra_orders once active load drops below the
+  // global cap. Mirror that locally as soon as the dashboard reports <2.
+  ref.listen<AsyncValue<DashboardSnapshot>>(dashboardFeedProvider, (prev, next) {
+    next.whenData((snap) {
+      if (snap.jobs.assigned.length < 2) notifier.resetLocal();
+    });
+  });
+  return notifier;
+});
+
 // ─── Dismissed offer ids (session-scoped, no server roundtrip) ───────────────
 
 class DismissedOffersNotifier extends StateNotifier<Set<String>> {
